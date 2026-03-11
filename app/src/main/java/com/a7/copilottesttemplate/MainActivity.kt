@@ -5,8 +5,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -40,12 +44,18 @@ fun MainScreen(modifier: Modifier = Modifier) {
     
     Column(modifier = modifier.padding(16.dp)) {
         Greeting(name = "Android")
-        Text(text = "You clicked the button $count times", modifier = Modifier.padding(top = 8.dp))
-        Button(
-            onClick = { count++ },
-            modifier = Modifier.padding(top = 16.dp)
-        ) {
-            Text(text = "Click me!")
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = "Interaction Counter")
+        Text(text = "Count: $count")
+        
+        Row(modifier = Modifier.padding(top = 16.dp)) {
+            Button(onClick = { count++ }) {
+                Text(text = "Increment")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(onClick = { if (count > 0) count-- }) {
+                Text(text = "Decrement")
+            }
         }
     }
 }
