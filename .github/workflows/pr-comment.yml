@@ -4,6 +4,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+permissions:
+  pull-requests: write
+
 jobs:
   comment:
     runs-on: ubuntu-latest
@@ -16,17 +19,36 @@ jobs:
       - name: Get changed files
         id: changed-files
         run: |
-          echo "changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | tr '\n' ' ')" >> $GITHUB_OUTPUT
-
-      - name: Analyze test scope
-        id: analyze
-        run: |
-          changed_files="${{ steps.changed-files.outputs.changed_files }}"
-          test_scope="Test scope for QA: The following files have been changed: $changed_files. Please ensure that all relevant unit tests, integration tests, and UI tests are updated or added to cover these changes."
-          echo "test_scope=$test_scope" >> $GITHUB_OUTPUT
+          # Get list of changed files and format as markdown list
+          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | head -n 50 | sed 's/^/- /')
+          if [ $(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | wc -l) -gt 50 ]; then
+            FILES="$FILES"$'\n'"- ... and more files"
+          fi
+          
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Add comment to PR
         run: |
-          gh pr comment ${{ github.event.pull_request.number }} --body "${{ steps.analyze.outputs.test_scope }}"
+          cat <<EOF > comment.md
+          ### 🧪 QA Test Scope Analysis
+          The following files have been modified in this PR:
+          
+          ${{ steps.changed-files.outputs.files }}
+          
+          **Testing Guidance:**
+          - Ensure all relevant unit tests, integration tests, and UI tests are updated or added.
+          - Verify business logic changes in the modified files.
+          - Check for regressions in modules depending on these files.
+          EOF
+          
+          # Remove previous bot comment to keep thread clean
+          OLD_COMMENT=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq '.comments[] | select(.body | contains("QA Test Scope Analysis")) | .id' | head -n 1)
+          if [ -n "$OLD_COMMENT" ]; then
+            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/$OLD_COMMENT"
+          fi
+
+          gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
