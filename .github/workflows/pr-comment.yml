@@ -19,8 +19,8 @@ jobs:
       - name: Analyze Changes
         id: analysis
         run: |
-          # Get list of changed files
-          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          # Get list of changed files, filtering out IDE and CI config files
+          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -vEi "^\.idea/|^\.github/" || true)
           
           # Initialize summary components
           UI_COUNT=0
