@@ -23,43 +23,60 @@ jobs:
           FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
           
           # Initialize summary components
-          UI_SUMMARY=""
-          LOGIC_SUMMARY=""
-          RES_SUMMARY=""
-          BUILD_SUMMARY=""
-          MANIFEST_SUMMARY=""
+          UI_COUNT=0
+          LOGIC_COUNT=0
+          RES_COUNT=0
+          BUILD_COUNT=0
+          MANIFEST_COUNT=0
           
-          # Filter files for categorization
-          UI_FILES=$(echo "$FILES" | grep -iE "Activity|Fragment|@Composable|View" || true)
-          LOGIC_FILES=$(echo "$FILES" | grep -v "Test" | grep -E "\.kt$|\.java$" | grep -vEi "Activity|Fragment|View" || true)
-          RES_FILES=$(echo "$FILES" | grep "\.xml$" | grep -v "AndroidManifest" || true)
-          BUILD_FILES=$(echo "$FILES" | grep -E "\.gradle|\.properties|\.pro" || true)
-          MANIFEST_FILES=$(echo "$FILES" | grep "AndroidManifest.xml" || true)
+          UI_LIST=""
+          LOGIC_LIST=""
+          MANIFEST_LIST=""
+          BUILD_LIST=""
 
-          # Build summary strings
-          [ -n "$UI_FILES" ] && UI_SUMMARY="- **UI/Flow**: $(echo "$UI_FILES" | wc -l | xargs) visual/entry-point files modified."
-          [ -n "$LOGIC_FILES" ] && LOGIC_SUMMARY="- **Business Logic**: $(echo "$LOGIC_FILES" | wc -l | xargs) core logic files touched."
-          [ -n "$RES_FILES" ] && RES_SUMMARY="- **Resources**: $(echo "$RES_FILES" | wc -l | xargs) XML/Asset files changed."
-          [ -n "$BUILD_FILES" ] && BUILD_SUMMARY="- **Build/Config**: Infrastructure or dependency changes detected."
-          [ -n "$MANIFEST_FILES" ] && MANIFEST_SUMMARY="- **Manifest**: System configuration/Permissions modified (Critical)."
+          for file in $FILES; do
+            # Skip deleted files for content analysis
+            if [ ! -f "$file" ]; then continue; fi
 
+            if [[ $file == *".kt"* ]] || [[ $file == *".java"* ]]; then
+              if [[ $file == *"Test"* ]]; then
+                continue # Ignore tests from count
+              elif grep -qE "@Composable|Activity|Fragment|View" "$file" 2>/dev/null; then
+                UI_COUNT=$((UI_COUNT+1))
+                UI_LIST="$UI_LIST- $file\n"
+              else
+                LOGIC_COUNT=$((LOGIC_COUNT+1))
+                LOGIC_LIST="$LOGIC_LIST- $file\n"
+              fi
+            elif [[ $file == *"AndroidManifest.xml"* ]]; then
+              MANIFEST_COUNT=$((MANIFEST_COUNT+1))
+              MANIFEST_LIST="$MANIFEST_LIST- $file\n"
+            elif [[ $file == *"xml"* ]]; then
+              RES_COUNT=$((RES_COUNT+1))
+            elif [[ $file == *".gradle"* ]] || [[ $file == *".properties"* ]] || [[ $file == *".pro"* ]]; then
+              BUILD_COUNT=$((BUILD_COUNT+1))
+              BUILD_LIST="$BUILD_LIST- $file\n"
+            fi
+          done
+
+          # Build summary block
           {
             echo "scope_block<<EOF"
             echo "<!-- SCOPE_START -->"
             echo "## 🧪 Overall Testing Scope"
             echo "### 📊 Summary of Impact"
-            [ -n "$MANIFEST_SUMMARY" ] && echo "$MANIFEST_SUMMARY"
-            [ -n "$UI_SUMMARY" ] && echo "$UI_SUMMARY"
-            [ -n "$LOGIC_SUMMARY" ] && echo "$LOGIC_SUMMARY"
-            [ -n "$RES_SUMMARY" ] && echo "$RES_SUMMARY"
-            [ -n "$BUILD_SUMMARY" ] && echo "$BUILD_SUMMARY"
+            [ $MANIFEST_COUNT -gt 0 ] && echo "- **Manifest**: $MANIFEST_COUNT system/permission changes (Critical)."
+            [ $UI_COUNT -gt 0 ] && echo "- **UI/Flow**: $UI_COUNT visual/entry-point files modified."
+            [ $LOGIC_COUNT -gt 0 ] && echo "- **Business Logic**: $LOGIC_COUNT core logic files touched."
+            [ $RES_COUNT -gt 0 ] && echo "- **Resources**: $RES_COUNT XML/Asset files changed."
+            [ $BUILD_COUNT -gt 0 ] && echo "- **Build/Config**: Infrastructure or dependency changes detected."
             
             echo ""
             echo "### 🛠 Recommended QA Focus"
-            [ -n "$MANIFEST_FILES" ] && echo "- [ ] **System**: Verify permission changes or new Activity declarations."
-            [ -n "$UI_FILES" ] && echo "- [ ] **Visual**: Perform a visual regression sweep on affected UI components."
-            [ -n "$LOGIC_FILES" ] && echo "- [ ] **Functional**: Verify business logic flows and handle potential edge cases."
-            [ -n "$BUILD_FILES" ] && echo "- [ ] **Stability**: Ensure the app builds and launches correctly after dependency updates."
+            [ $MANIFEST_COUNT -gt 0 ] && echo "- [ ] **System**: Verify permission changes or new Activity declarations."
+            [ $UI_COUNT -gt 0 ] && echo "- [ ] **Visual**: Perform a visual regression sweep on affected UI components."
+            [ $LOGIC_COUNT -gt 0 ] && echo "- [ ] **Functional**: Verify business logic flows and handle potential edge cases."
+            [ $BUILD_COUNT -gt 0 ] && echo "- [ ] **Stability**: Ensure the app builds and launches correctly after dependency updates."
             
             echo ""
             echo "> _Updated automatically by QA Bot 🤖 on $(date +'%Y-%m-%d %H:%M')_"
@@ -72,17 +89,17 @@ jobs:
           SCOPE_BLOCK: ${{ steps.analysis.outputs.scope_block }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Fetch the current PR body
+          # 1. Fetch current PR body
           PR_BODY=$(gh pr view ${{ github.event.pull_request.number }} --json body --jq '.body')
           
-          # Inject or update the Testing Scope section using markers
+          # 2. Update or Append the block using environment variables in Perl to avoid escaping issues
           if echo "$PR_BODY" | grep -q "<!-- SCOPE_START -->"; then
-            # Use environment variable to avoid escaping issues with slashes in the content
-            echo "$PR_BODY" | SCOPE_REPLACEMENT="$SCOPE_BLOCK" perl -0777 -pe 's/<!-- SCOPE_START -->.*?<!-- SCOPE_END -->/$ENV{SCOPE_REPLACEMENT}/s' > new_body.md
+            # Replace existing block
+            printf "%s" "$PR_BODY" | SCOPE_REPLACEMENT="$SCOPE_BLOCK" perl -0777 -pe 's/<!-- SCOPE_START -->.*?<!-- SCOPE_END -->/$ENV{SCOPE_REPLACEMENT}/s' > new_body.md
           else
             # Append to the bottom if not present
-            echo -e "$PR_BODY\n\n$SCOPE_BLOCK" > new_body.md
+            printf "%s\n\n%s" "$PR_BODY" "$SCOPE_BLOCK" > new_body.md
           fi
           
-          # Edit the PR
+          # 3. Save and Edit
           gh pr edit ${{ github.event.pull_request.number }} --body-file new_body.md
