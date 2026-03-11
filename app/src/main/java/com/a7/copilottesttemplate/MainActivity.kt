@@ -30,6 +30,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Test comment to trigger PR workflow.
+ */
 @Composable
 fun Greeting(name: String, modifier: Modifier = Modifier) {
     Text(
