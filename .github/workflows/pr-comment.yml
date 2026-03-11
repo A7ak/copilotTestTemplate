@@ -1,4 +1,4 @@
-name: PR Comment for Test Scope
+name: Update PR Testing Scope
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  comment:
+  update-scope:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -22,97 +22,66 @@ jobs:
           # Get list of changed files
           FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
           
-          # Initialize counts and lists
-          UI_COUNT=0
-          LOGIC_COUNT=0
-          RES_COUNT=0
-          TEST_COUNT=0
-          MANIFEST_COUNT=0
+          # Initialize summary components
+          UI_SUMMARY=""
+          LOGIC_SUMMARY=""
+          RES_SUMMARY=""
+          BUILD_SUMMARY=""
+          MANIFEST_SUMMARY=""
           
-          TABLE_ROWS=""
-          
-          for file in $FILES; do
-            TYPE="Other"
-            IMPACT="Low"
+          # Filter files for categorization
+          UI_FILES=$(echo "$FILES" | grep -iE "Activity|Fragment|@Composable|View" || true)
+          LOGIC_FILES=$(echo "$FILES" | grep -v "Test" | grep -E "\.kt$|\.java$" | grep -vEi "Activity|Fragment|View" || true)
+          RES_FILES=$(echo "$FILES" | grep "\.xml$" | grep -v "AndroidManifest" || true)
+          BUILD_FILES=$(echo "$FILES" | grep -E "\.gradle|\.properties|\.pro" || true)
+          MANIFEST_FILES=$(echo "$FILES" | grep "AndroidManifest.xml" || true)
+
+          # Build summary strings
+          [ -n "$UI_FILES" ] && UI_SUMMARY="- **UI/Flow**: $(echo "$UI_FILES" | wc -l | xargs) visual/entry-point files modified."
+          [ -n "$LOGIC_FILES" ] && LOGIC_SUMMARY="- **Business Logic**: $(echo "$LOGIC_FILES" | wc -l | xargs) core logic files touched."
+          [ -n "$RES_FILES" ] && RES_SUMMARY="- **Resources**: $(echo "$RES_FILES" | wc -l | xargs) XML/Asset files changed."
+          [ -n "$BUILD_FILES" ] && BUILD_SUMMARY="- **Build/Config**: Infrastructure or dependency changes detected."
+          [ -n "$MANIFEST_FILES" ] && MANIFEST_SUMMARY="- **Manifest**: System configuration/Permissions modified (Critical)."
+
+          {
+            echo "scope_block<<EOF"
+            echo "<!-- SCOPE_START -->"
+            echo "## 🧪 Overall Testing Scope"
+            echo "### 📊 Summary of Impact"
+            [ -n "$MANIFEST_SUMMARY" ] && echo "$MANIFEST_SUMMARY"
+            [ -n "$UI_SUMMARY" ] && echo "$UI_SUMMARY"
+            [ -n "$LOGIC_SUMMARY" ] && echo "$LOGIC_SUMMARY"
+            [ -n "$RES_SUMMARY" ] && echo "$RES_SUMMARY"
+            [ -n "$BUILD_SUMMARY" ] && echo "$BUILD_SUMMARY"
             
-            if [[ $file == *".kt"* ]] || [[ $file == *".java"* ]]; then
-              if [[ $file == *"Test"* ]]; then
-                TYPE="Test"
-                IMPACT="None (Internal)"
-                TEST_COUNT=$((TEST_COUNT+1))
-              elif grep -q "@Composable" "$file" 2>/dev/null || grep -q "Activity" "$file" 2>/dev/null; then
-                TYPE="UI/Logic"
-                IMPACT="High (Visual/Flow)"
-                UI_COUNT=$((UI_COUNT+1))
-              else
-                TYPE="Business Logic"
-                IMPACT="Medium (Functional)"
-                LOGIC_COUNT=$((LOGIC_COUNT+1))
-              fi
-            elif [[ $file == *"xml"* ]]; then
-              if [[ $file == *"AndroidManifest.xml"* ]]; then
-                TYPE="Manifest"
-                IMPACT="Critical (Config)"
-                MANIFEST_COUNT=$((MANIFEST_COUNT+1))
-              else
-                TYPE="Resource"
-                IMPACT="Medium (Layout/Strings)"
-                RES_COUNT=$((RES_COUNT+1))
-              fi
-            elif [[ $file == *".gradle"* ]]; then
-              TYPE="Build Script"
-              IMPACT="High (Dependency)"
-            fi
+            echo ""
+            echo "### 🛠 Recommended QA Focus"
+            [ -n "$MANIFEST_FILES" ] && echo "- [ ] **System**: Verify permission changes or new Activity declarations."
+            [ -n "$UI_FILES" ] && echo "- [ ] **Visual**: Perform a visual regression sweep on affected UI components."
+            [ -n "$LOGIC_FILES" ] && echo "- [ ] **Functional**: Verify business logic flows and handle potential edge cases."
+            [ -n "$BUILD_FILES" ] && echo "- [ ] **Stability**: Ensure the app builds and launches correctly after dependency updates."
             
-            TABLE_ROWS="$TABLE_ROWS| \`$file\` | $TYPE | $IMPACT |"$'\n'
-          done
+            echo ""
+            echo "> _Updated automatically by QA Bot 🤖 on $(date +'%Y-%m-%d %H:%M')_"
+            echo "<!-- SCOPE_END -->"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
-          # Limit table size if too many files
-          TOTAL_FILES=$(echo "$FILES" | wc -l)
-          if [ "$TOTAL_FILES" -gt 20 ]; then
-             TABLE_ROWS=$(echo "$TABLE_ROWS" | head -n 20)
-             TABLE_ROWS="$TABLE_ROWS| ... and $((TOTAL_FILES-20)) more files | - | - |"
-          fi
-
-          echo "table_rows<<EOF" >> $GITHUB_OUTPUT
-          echo "$TABLE_ROWS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          
-          echo "summary=| UI/Logic | $UI_COUNT |" >> $GITHUB_OUTPUT
-          echo "summary_logic=| Business Logic | $LOGIC_COUNT |" >> $GITHUB_OUTPUT
-          echo "summary_res=| Resources | $RES_COUNT |" >> $GITHUB_OUTPUT
-          echo "summary_test=| Tests | $TEST_COUNT |" >> $GITHUB_OUTPUT
-
-      - name: Add comment to PR
+      - name: Update PR Description
         run: |
-          cat <<EOF > comment.md
-          ### 🧪 QA Test Scope Analysis
+          # Fetch the current PR body
+          PR_BODY=$(gh pr view ${{ github.event.pull_request.number }} --json body --jq '.body')
           
-          #### 📊 Impact Summary
-          | Category | File Count |
-          | :--- | :--- |
-          ${{ steps.analysis.outputs.summary }}
-          ${{ steps.analysis.outputs.summary_logic }}
-          ${{ steps.analysis.outputs.summary_res }}
-          ${{ steps.analysis.outputs.summary_test }}
-          
-          #### 📂 Detailed File Analysis
-          | File Path | Type | Impact Level |
-          | :--- | :--- | :--- |
-          ${{ steps.analysis.outputs.table_rows }}
-          
-          **🛠 Recommended QA Actions:**
-          1. **Regression**: Verify if existing flows are affected by logic changes.
-          2. **UI Check**: If UI/Resource count > 0, perform a visual sweep on multiple devices.
-          3. **Manifest**: If Manifest changes exist, check for permission or launch changes.
-          4. **Unit Tests**: Ensure Test count matches logic complexity.
-          EOF
-          
-          # Remove previous bot comment to keep thread clean
-          OLD_COMMENT=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq '.comments[] | select(.body | contains("QA Test Scope Analysis")) | .id' | head -n 1)
-          if [ -n "$OLD_COMMENT" ]; then
-            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/$OLD_COMMENT" || echo "Old comment could not be deleted."
+          # Inject or update the Testing Scope section using markers
+          if echo "$PR_BODY" | grep -q "<!-- SCOPE_START -->"; then
+            # Replace existing block
+            echo "$PR_BODY" | perl -0777 -pe 's/<!-- SCOPE_START -->.*?<!-- SCOPE_END -->/${{ steps.analysis.outputs.scope_block }}/s' > new_body.md
+          else
+            # Append to the bottom if not present
+            echo -e "$PR_BODY\n\n${{ steps.analysis.outputs.scope_block }}" > new_body.md
           fi
-          gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
+          
+          # Edit the PR
+          gh pr edit ${{ github.event.pull_request.number }} --body-file new_body.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
