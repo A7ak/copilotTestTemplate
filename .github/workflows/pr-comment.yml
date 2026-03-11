@@ -6,7 +6,6 @@ on:
 
 permissions:
   pull-requests: write
-  issues: write
 
 jobs:
   comment:
@@ -17,36 +16,102 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get changed files
-        id: changed-files
+      - name: Analyze Changes
+        id: analysis
         run: |
-          # Get list of changed files and format as markdown list
-          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | head -n 50 | sed 's/^/- /')
-          if [ $(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | wc -l) -gt 50 ]; then
-            FILES="$FILES"$'\n'- ... and more files
+          # Get list of changed files
+          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          
+          # Initialize counts and lists
+          UI_COUNT=0
+          LOGIC_COUNT=0
+          RES_COUNT=0
+          TEST_COUNT=0
+          MANIFEST_COUNT=0
+          
+          TABLE_ROWS=""
+          
+          for file in $FILES; do
+            TYPE="Other"
+            IMPACT="Low"
+            
+            if [[ $file == *".kt"* ]] || [[ $file == *".java"* ]]; then
+              if [[ $file == *"Test"* ]]; then
+                TYPE="Test"
+                IMPACT="None (Internal)"
+                TEST_COUNT=$((TEST_COUNT+1))
+              elif grep -q "@Composable" "$file" 2>/dev/null || grep -q "Activity" "$file" 2>/dev/null; then
+                TYPE="UI/Logic"
+                IMPACT="High (Visual/Flow)"
+                UI_COUNT=$((UI_COUNT+1))
+              else
+                TYPE="Business Logic"
+                IMPACT="Medium (Functional)"
+                LOGIC_COUNT=$((LOGIC_COUNT+1))
+              fi
+            elif [[ $file == *"xml"* ]]; then
+              if [[ $file == *"AndroidManifest.xml"* ]]; then
+                TYPE="Manifest"
+                IMPACT="Critical (Config)"
+                MANIFEST_COUNT=$((MANIFEST_COUNT+1))
+              else
+                TYPE="Resource"
+                IMPACT="Medium (Layout/Strings)"
+                RES_COUNT=$((RES_COUNT+1))
+              fi
+            elif [[ $file == *".gradle"* ]]; then
+              TYPE="Build Script"
+              IMPACT="High (Dependency)"
+            fi
+            
+            TABLE_ROWS="$TABLE_ROWS| \`$file\` | $TYPE | $IMPACT |"$'\n'
+          done
+
+          # Limit table size if too many files
+          TOTAL_FILES=$(echo "$FILES" | wc -l)
+          if [ "$TOTAL_FILES" -gt 20 ]; then
+             TABLE_ROWS=$(echo "$TABLE_ROWS" | head -n 20)
+             TABLE_ROWS="$TABLE_ROWS| ... and $((TOTAL_FILES-20)) more files | - | - |"
           fi
-          echo "files<<EOF" >> $GITHUB_OUTPUT
-          echo "$FILES" >> $GITHUB_OUTPUT
+
+          echo "table_rows<<EOF" >> $GITHUB_OUTPUT
+          echo "$TABLE_ROWS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "summary=| UI/Logic | $UI_COUNT |" >> $GITHUB_OUTPUT
+          echo "summary_logic=| Business Logic | $LOGIC_COUNT |" >> $GITHUB_OUTPUT
+          echo "summary_res=| Resources | $RES_COUNT |" >> $GITHUB_OUTPUT
+          echo "summary_test=| Tests | $TEST_COUNT |" >> $GITHUB_OUTPUT
 
       - name: Add comment to PR
         run: |
           cat <<EOF > comment.md
           ### 🧪 QA Test Scope Analysis
-          The following files have been modified in this PR:
           
-          ${{ steps.changed-files.outputs.files }}
+          #### 📊 Impact Summary
+          | Category | File Count |
+          | :--- | :--- |
+          ${{ steps.analysis.outputs.summary }}
+          ${{ steps.analysis.outputs.summary_logic }}
+          ${{ steps.analysis.outputs.summary_res }}
+          ${{ steps.analysis.outputs.summary_test }}
           
-          **Testing Guidance:**
-          - Ensure all relevant unit tests, integration tests, and UI tests are updated or added.
-          - Verify business logic changes in the modified files.
-          - Check for regressions in modules depending on these files.
+          #### 📂 Detailed File Analysis
+          | File Path | Type | Impact Level |
+          | :--- | :--- | :--- |
+          ${{ steps.analysis.outputs.table_rows }}
+          
+          **🛠 Recommended QA Actions:**
+          1. **Regression**: Verify if existing flows are affected by logic changes.
+          2. **UI Check**: If UI/Resource count > 0, perform a visual sweep on multiple devices.
+          3. **Manifest**: If Manifest changes exist, check for permission or launch changes.
+          4. **Unit Tests**: Ensure Test count matches logic complexity.
           EOF
           
           # Remove previous bot comment to keep thread clean
           OLD_COMMENT=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq '.comments[] | select(.body | contains("QA Test Scope Analysis")) | .id' | head -n 1)
           if [ -n "$OLD_COMMENT" ]; then
-            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/$OLD_COMMENT" || echo "Old comment could not be deleted (may not exist)."
+            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/$OLD_COMMENT" || echo "Old comment could not be deleted."
           fi
           gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
         env:
