@@ -21,7 +21,7 @@ class MainActivity : ComponentActivity() {
             CopilotTestTemplateTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Greeting(
-                        name = "Android",
+                        name = "test 2",
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
