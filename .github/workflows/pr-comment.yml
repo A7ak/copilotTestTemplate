@@ -1,0 +1,32 @@
+name: PR Comment for Test Scope
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed-files
+        run: |
+          echo "changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | tr '\n' ' ')" >> $GITHUB_OUTPUT
+
+      - name: Analyze test scope
+        id: analyze
+        run: |
+          changed_files="${{ steps.changed-files.outputs.changed_files }}"
+          test_scope="Test scope for QA: The following files have been changed: $changed_files. Please ensure that all relevant unit tests, integration tests, and UI tests are updated or added to cover these changes."
+          echo "test_scope=$test_scope" >> $GITHUB_OUTPUT
+
+      - name: Add comment to PR
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --body "${{ steps.analyze.outputs.test_scope }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
