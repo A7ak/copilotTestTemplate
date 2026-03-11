@@ -68,20 +68,21 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Update PR Description
+        env:
+          SCOPE_BLOCK: ${{ steps.analysis.outputs.scope_block }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Fetch the current PR body
           PR_BODY=$(gh pr view ${{ github.event.pull_request.number }} --json body --jq '.body')
           
           # Inject or update the Testing Scope section using markers
           if echo "$PR_BODY" | grep -q "<!-- SCOPE_START -->"; then
-            # Replace existing block
-            echo "$PR_BODY" | perl -0777 -pe 's/<!-- SCOPE_START -->.*?<!-- SCOPE_END -->/${{ steps.analysis.outputs.scope_block }}/s' > new_body.md
+            # Use environment variable to avoid escaping issues with slashes in the content
+            echo "$PR_BODY" | SCOPE_REPLACEMENT="$SCOPE_BLOCK" perl -0777 -pe 's/<!-- SCOPE_START -->.*?<!-- SCOPE_END -->/$ENV{SCOPE_REPLACEMENT}/s' > new_body.md
           else
             # Append to the bottom if not present
-            echo -e "$PR_BODY\n\n${{ steps.analysis.outputs.scope_block }}" > new_body.md
+            echo -e "$PR_BODY\n\n$SCOPE_BLOCK" > new_body.md
           fi
           
           # Edit the PR
           gh pr edit ${{ github.event.pull_request.number }} --body-file new_body.md
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
