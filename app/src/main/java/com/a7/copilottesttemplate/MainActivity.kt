@@ -10,6 +10,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import com.a7.copilottesttemplate.ui.theme.CopilotTestTemplateTheme
 
@@ -21,7 +22,7 @@ class MainActivity : ComponentActivity() {
             CopilotTestTemplateTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Greeting(
-                        name = "Android",
+                        name = "test 2",
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -30,10 +31,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Test comment to trigger PR workflow.
+ */
 @Composable
 fun Greeting(name: String, modifier: Modifier = Modifier) {
     Text(
-        text = "Hello $name!",
+        text = stringResource(id = R.string.greeting_text, name),
         modifier = modifier
     )
 }
